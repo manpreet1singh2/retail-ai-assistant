@@ -5,54 +5,50 @@ export default function Page() {
   const overview = getOverview();
 
   return (
-    <main className="main-shell">
+    <main className="page">
+      {/* ── Hero ── */}
       <section className="hero">
         <div className="card hero-copy">
-          <div className="kicker">retail ai assistant</div>
-          <h1>Professional product, order, and returns intelligence.</h1>
+          <div className="kicker">✦ Retail AI Assistant</div>
+          <h1>Product, order &amp; returns intelligence.</h1>
           <p className="lead">
-            A polished web interface for exploring the retail catalog, checking order records, and evaluating returns against the provided policy files.
-            The assistant is grounded in the local data set and can optionally use OpenAI function calling when an API key is configured.
+            A production-grade AI assistant grounded in live catalog data. Search products with
+            multi-constraint reasoning, look up orders, and evaluate returns against policy —
+            with zero hallucination via mandatory tool calling.
           </p>
-          <div className="badge-row">
-            <span className="badge">Pandas-style local data handling</span>
-            <span className="badge">Tool-based reasoning</span>
-            <span className="badge">Hallucination prevention</span>
-            <span className="badge">Responsive Next.js UI</span>
+          <div className="tag-row">
+            <span className="tag">Tool-based reasoning</span>
+            <span className="tag">Hallucination prevention</span>
+            <span className="tag">Policy-aware returns</span>
+            <span className="tag">OpenAI + local fallback</span>
           </div>
         </div>
 
         <div className="card hero-stats">
-          <div className="stat-grid">
-            <div className="stat">
-              <div className="stat-label">Catalog size</div>
-              <div className="stat-value">{overview.productCount}</div>
-              <div className="stat-note">Products loaded from data/products.csv</div>
+          {[
+            { icon: '🛍️', label: 'Products',   value: overview.productCount,  sub: 'live catalog entries' },
+            { icon: '📦', label: 'Orders',     value: overview.orderCount,    sub: 'imported records' },
+            { icon: '🏷️', label: 'Vendors',    value: overview.vendorCount,   sub: 'distinct brands' },
+            { icon: '🔥', label: 'On Sale',    value: overview.saleCount,     sub: 'discounted items' },
+          ].map((s) => (
+            <div className="mini-stat" key={s.label}>
+              <div className="mini-stat-icon">{s.icon}</div>
+              <div>
+                <div className="mini-stat-val">{s.value}</div>
+                <div className="mini-stat-label">{s.label} · {s.sub}</div>
+              </div>
             </div>
-            <div className="stat">
-              <div className="stat-label">Orders</div>
-              <div className="stat-value">{overview.orderCount}</div>
-              <div className="stat-note">Orders loaded from data/orders.csv</div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Vendors</div>
-              <div className="stat-value">{overview.vendorCount}</div>
-              <div className="stat-note">Across the live inventory</div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Sale items</div>
-              <div className="stat-value">{overview.saleCount}</div>
-              <div className="stat-note">Policy-aware sale handling</div>
-            </div>
-          </div>
+          ))}
         </div>
       </section>
 
+      {/* ── Chat + Panel ── */}
       <ChatApp overview={overview} />
 
-      <div className="footer-note">
-        Return rules are read from data/policy.txt. The app uses the order date as the available time reference because the provided order file does not contain delivery dates.
-      </div>
+      <p className="page-footer">
+        Data sourced from embedded catalog · Policy applied from data/policy.txt ·
+        Return eligibility uses order date as reference
+      </p>
     </main>
   );
 }

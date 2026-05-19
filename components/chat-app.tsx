@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useEffect, useState } from 'react';
 
 export type Overview = {
   productCount: number;
@@ -24,160 +24,256 @@ export type Overview = {
   };
 };
 
-type Message = { role: 'user' | 'assistant'; content: string; trace?: any[] };
+type TraceItem = { tool: string; args: unknown; output: unknown };
+type Message   = { role: 'user' | 'assistant'; content: string; trace?: TraceItem[]; mode?: string };
 
-const samples = [
-  'show me the best-selling options under $250',
-  'tell me about product P0048',
-  'check order O0041',
-  'can I return order O0044 because it arrived late?',
+const SAMPLES = [
+  { icon: '👗', text: 'Modest evening gown under $300 in size 8, prefer sale' },
+  { icon: '📦', text: 'What\'s in order O0041?' },
+  { icon: '🔄', text: 'Can I return order O0044? It doesn\'t fit.' },
+  { icon: '⭐', text: 'Show me best-selling options under $200' },
 ];
+
+function TypingDots() {
+  return (
+    <span className="typing-dots" aria-label="Assistant is typing">
+      <span />
+      <span />
+      <span />
+    </span>
+  );
+}
+
+function TracePanel({ trace }: { trace: TraceItem[] }) {
+  const [open, setOpen] = useState(false);
+  if (!trace?.length) return null;
+  return (
+    <div className="trace-panel">
+      <button className="trace-toggle" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span className="trace-icon">⚙</span>
+        {open ? 'Hide' : 'Show'} tool trace ({trace.length} call{trace.length !== 1 ? 's' : ''})
+        <span className="trace-chevron" style={{ transform: open ? 'rotate(180deg)' : 'none' }}>▾</span>
+      </button>
+      {open && (
+        <div className="trace-items">
+          {trace.map((item, i) => (
+            <div className="trace-item" key={i}>
+              <div className="trace-tool-name">{item.tool}</div>
+              <div className="trace-row">
+                <span className="trace-label">Args</span>
+                <code className="trace-code">{JSON.stringify(item.args)}</code>
+              </div>
+              <div className="trace-row">
+                <span className="trace-label">Output</span>
+                <code className="trace-code trace-output">{JSON.stringify(item.output, null, 2)}</code>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function ChatApp({ overview }: { overview: Overview }) {
   const [messages, setMessages] = useState<Message[]>([
     {
-      role: 'assistant',
-      content:
-        'Welcome to Retail AI Assistant. Ask me to search products, look up a product or order, or check whether an order is eligible for return.',
+      role:    'assistant',
+      content: 'Hello! I\'m your Retail AI Assistant. I can help you find the perfect product, look up orders, or check return eligibility — all grounded in live catalog data. What can I help you with?',
     },
   ]);
-  const [input, setInput] = useState('');
+  const [input,   setInput]   = useState('');
   const [loading, setLoading] = useState(false);
+  const historyRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const starterCards = useMemo(
+  useEffect(() => {
+    if (historyRef.current) {
+      historyRef.current.scrollTop = historyRef.current.scrollHeight;
+    }
+  }, [messages, loading]);
+
+  const statsCards = useMemo(
     () => [
-      { label: 'Products', value: overview.productCount.toString(), note: 'Live catalog entries' },
-      { label: 'Orders', value: overview.orderCount.toString(), note: 'Imported order records' },
-      { label: 'Vendors', value: overview.vendorCount.toString(), note: 'Distinct brands in catalog' },
-      { label: 'Sale items', value: overview.saleCount.toString(), note: 'Discounted inventory' },
+      { label: 'Products',   value: overview.productCount, icon: '🛍️',  note: 'in catalog' },
+      { label: 'Orders',     value: overview.orderCount,   icon: '📦',  note: 'on record' },
+      { label: 'Vendors',    value: overview.vendorCount,  icon: '🏷️',  note: 'brands' },
+      { label: 'On Sale',    value: overview.saleCount,    icon: '🔥',  note: 'discounted' },
     ],
     [overview],
   );
 
-  async function send(message: string) {
-    const text = message.trim();
-    if (!text || loading) return;
-    setMessages((current) => [...current, { role: 'user', content: text }]);
+  const policyBadges = useMemo(
+    () => [
+      { label: 'Normal',   desc: overview.policySummary.normal,    color: 'var(--success)' },
+      { label: 'Sale',     desc: overview.policySummary.sale,       color: 'var(--warning)' },
+      { label: 'Clearance',desc: overview.policySummary.clearance, color: 'var(--danger)' },
+      { label: 'Nocturne', desc: overview.policySummary.nocturne,  color: 'var(--accent)' },
+      { label: 'Aurelia',  desc: overview.policySummary.aurelia,   color: 'var(--purple)' },
+    ],
+    [overview],
+  );
+
+  async function send(text: string) {
+    const msg = text.trim();
+    if (!msg || loading) return;
     setInput('');
+    setMessages((prev) => [...prev, { role: 'user', content: msg }]);
     setLoading(true);
+
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
+      const res  = await fetch('/api/chat', {
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [...messages, { role: 'user', content: text }] }),
+        body:    JSON.stringify({ messages: [...messages, { role: 'user', content: msg }] }),
       });
-      const data = await response.json();
-      setMessages((current) => [...current, { role: 'assistant', content: data.reply, trace: data.trace ?? [] }]);
+      const data = await res.json();
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: data.reply ?? 'No response received.', trace: data.trace ?? [], mode: data.mode },
+      ]);
     } catch {
-      setMessages((current) => [...current, { role: 'assistant', content: 'The assistant could not reach the chat API. Please try again.' }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: 'Connection error — could not reach the assistant API. Please try again.' },
+      ]);
     } finally {
       setLoading(false);
+      textareaRef.current?.focus();
     }
   }
 
   return (
-    <div className="grid">
-      <section className="card panel">
-        <h2>Retail intelligence</h2>
-        <p>
-          Search the catalog, inspect orders, and validate returns with grounded responses powered by the local data files.
-        </p>
-        <div className="stat-grid" style={{ marginTop: 18 }}>
-          {starterCards.map((card) => (
-            <div className="stat" key={card.label}>
-              <div className="stat-label">{card.label}</div>
-              <div className="stat-value">{card.value}</div>
-              <div className="stat-note">{card.note}</div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ marginTop: 18 }}>
-          <div className="stat-label">Policy summary</div>
-          <div className="badge-row">
-            <span className="badge">Normal: {overview.policySummary.normal}</span>
-            <span className="badge">Sale: {overview.policySummary.sale}</span>
-            <span className="badge">Clearance: {overview.policySummary.clearance}</span>
-            <span className="badge">Nocturne: {overview.policySummary.nocturne}</span>
-            <span className="badge">Aurelia: {overview.policySummary.aurelia}</span>
+    <div className="app-grid">
+      {/* ── Left panel ── */}
+      <aside className="side-panel card">
+        <div className="panel-section">
+          <div className="section-label">Live Catalog Stats</div>
+          <div className="stats-grid">
+            {statsCards.map((s) => (
+              <div className="stat-card" key={s.label}>
+                <span className="stat-icon">{s.icon}</span>
+                <div className="stat-number">{s.value}</div>
+                <div className="stat-meta">{s.label}</div>
+              </div>
+            ))}
           </div>
         </div>
 
-        <div style={{ marginTop: 18 }}>
-          <div className="stat-label">Top rated products</div>
-          <div className="sample-grid">
-            {overview.topRated.map((product) => (
-              <div className="sample" key={product.product_id} onClick={() => send(`Tell me about product ${product.product_id}`)}>
-                <strong>{product.title}</strong>
-                <div className="muted" style={{ marginTop: 4 }}>
-                  {product.product_id} · {product.vendor} · ${product.price} · score {product.bestseller_score}
+        <div className="panel-section">
+          <div className="section-label">Return Policy</div>
+          <div className="policy-list">
+            {policyBadges.map((b) => (
+              <div className="policy-row" key={b.label}>
+                <span className="policy-dot" style={{ background: b.color }} />
+                <div>
+                  <span className="policy-name">{b.label}</span>
+                  <span className="policy-desc">{b.desc}</span>
                 </div>
               </div>
             ))}
           </div>
         </div>
-      </section>
 
-      <section className="card chat-shell">
-        <div className="chat-header">
-          <div>
-            <div className="kicker">Live assistant</div>
-            <h2 style={{ marginTop: 10, marginBottom: 8 }}>Ask in plain English</h2>
-            <p className="muted" style={{ margin: 0 }}>
-              The assistant uses tool-based reasoning to stay grounded in the catalog, orders, and policy text.
-            </p>
+        <div className="panel-section">
+          <div className="section-label">Top Rated Products</div>
+          <div className="product-list">
+            {overview.topRated.map((p) => (
+              <button
+                key={p.product_id}
+                className="product-chip"
+                onClick={() => send(`Tell me about product ${p.product_id}`)}
+              >
+                <div className="chip-main">
+                  <span className="chip-title">{p.title}</span>
+                  <span className="chip-score">★ {p.bestseller_score}</span>
+                </div>
+                <div className="chip-meta">
+                  {p.product_id} · {p.vendor} · <strong>${p.price}</strong>
+                </div>
+              </button>
+            ))}
           </div>
-          <div className="badge">{loading ? 'Thinking…' : 'Ready'}</div>
         </div>
+      </aside>
 
-        <div className="chat-history">
-          {messages.map((message, index) => (
-            <div className={`message ${message.role}`} key={`${message.role}-${index}`}>
-              <div className="bubble">
-                {message.content}
-                {message.role === 'assistant' && message.trace?.length ? (
-                  <div className="tool-trace">
-                    <div style={{ color: 'var(--text)', fontWeight: 600, marginBottom: 6 }}>Tool trace</div>
-                    {message.trace.map((item, traceIndex) => (
-                      <div className="trace-item" key={traceIndex}>
-                        <div style={{ color: 'var(--accent)' }}>{item.tool}</div>
-                        <div>{JSON.stringify(item.args)}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </div>
+      {/* ── Chat panel ── */}
+      <section className="chat-panel card">
+        <header className="chat-header">
+          <div>
+            <div className="header-kicker">AI Assistant</div>
+            <h2 className="header-title">Ask in plain English</h2>
+          </div>
+          <div className={`status-pill ${loading ? 'status-busy' : 'status-ready'}`}>
+            {loading ? (
+              <><span className="status-dot pulse" />Thinking…</>
+            ) : (
+              <><span className="status-dot" />Ready</>
+            )}
+          </div>
+        </header>
+
+        {/* Sample prompts */}
+        <div className="samples-row">
+          {SAMPLES.map((s) => (
+            <button key={s.text} className="sample-btn" onClick={() => send(s.text)}>
+              <span>{s.icon}</span> {s.text}
+            </button>
           ))}
         </div>
 
-        <div className="chat-composer">
-          <div className="composer-row">
+        {/* Message history */}
+        <div className="chat-history" ref={historyRef}>
+          {messages.map((m, i) => (
+            <div key={i} className={`message-row ${m.role}`}>
+              <div className="message-avatar">
+                {m.role === 'user' ? '👤' : '🤖'}
+              </div>
+              <div className="message-body">
+                <div className="bubble">{m.content}</div>
+                {m.role === 'assistant' && <TracePanel trace={m.trace ?? []} />}
+                {m.mode && m.mode !== 'openai' && (
+                  <div className="mode-tag">{m.mode === 'local' ? '🔒 Local mode (no API key)' : `⚡ ${m.mode}`}</div>
+                )}
+              </div>
+            </div>
+          ))}
+          {loading && (
+            <div className="message-row assistant">
+              <div className="message-avatar">🤖</div>
+              <div className="message-body">
+                <div className="bubble"><TypingDots /></div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Composer */}
+        <div className="composer">
+          <div className="composer-inner">
             <textarea
+              ref={textareaRef}
               value={input}
-              onChange={(event) => setInput(event.target.value)}
               placeholder="Ask about products, orders, or returns…"
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
                   void send(input);
                 }
               }}
+              rows={1}
             />
-            <button className="send-btn" onClick={() => void send(input)} disabled={loading}>
-              {loading ? 'Working…' : 'Send'}
+            <button
+              className="send-btn"
+              onClick={() => void send(input)}
+              disabled={loading || !input.trim()}
+              aria-label="Send message"
+            >
+              {loading ? '⏳' : '↑'}
             </button>
           </div>
-          <div className="helper-row">
-            <span>Press Enter to send, Shift+Enter for a new line.</span>
-            <div>
-              {samples.map((sample) => (
-                <button key={sample} className="badge" style={{ marginLeft: 8, cursor: 'pointer' }} onClick={() => setInput(sample)}>
-                  {sample}
-                </button>
-              ))}
-            </div>
-          </div>
+          <p className="composer-hint">Enter to send · Shift+Enter for newline</p>
         </div>
       </section>
     </div>
